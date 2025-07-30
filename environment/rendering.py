@@ -3,7 +3,7 @@ from gymnasium import spaces
 import numpy as np
 import random
 import pygame
-from custom_env import GameRenderer  # Updated import statement
+from custom_env import GameRenderer
 
 class GarbageCollectionEnv(gym.Env):
     metadata = {"render_modes": ["human"]}
@@ -44,6 +44,11 @@ class GarbageCollectionEnv(gym.Env):
         self.renderer = None
         if self.render_mode == "human":
             self.renderer = GameRenderer(self.grid_size)
+        
+        # Additional state tracking
+        self.garbage_at_house = 0
+        self.garbage_at_facility = 0
+        self.total_steps = 0
         
         self.reset()
     
@@ -114,6 +119,11 @@ class GarbageCollectionEnv(gym.Env):
         self.total_reward = 0
         self.garbage_collected = 0
         
+        # Reset additional state variables
+        self.garbage_at_house = 0
+        self.garbage_at_facility = 0
+        self.total_steps = 0
+        
         return self._get_observation(), {}
     
     def _get_observation(self):
@@ -132,7 +142,7 @@ class GarbageCollectionEnv(gym.Env):
         return self.grid[row, col] != self.OBSTACLE
     
     def step(self, action):
-        reward = 0
+        reward = 0  # Initialize reward to 0 (neutral for empty grid movement)
         terminated = False
         info = {}
         
@@ -150,32 +160,31 @@ class GarbageCollectionEnv(gym.Env):
                 # Pick up garbage
                 self.grid[self.agent_pos[0], self.agent_pos[1]] = self.EMPTY
                 self.carrying = True
-                reward = 1
+                reward = 1  # Reward for picking up garbage
                 info['action'] = 'picked_up_garbage'
             elif not self.carrying:
-                # Try to pick up on empty
-                reward = -1
+                reward = -1  # Penalty for trying to pick up nothing
                 info['action'] = 'pick_up_failed'
             else:
-                # Already carrying
-                reward = -0.1
+                reward = -0.1  # Small penalty for invalid action
                 info['action'] = 'already_carrying'
             new_pos = self.agent_pos
         elif action == 5:  # DROP
             if self.carrying:
                 current_cell = self.grid[self.agent_pos[0], self.agent_pos[1]]
                 if current_cell == self.HOUSE:
-                    # Drop at house
-                    reward = 5
+                    # Drop at house - optional intermediate step
+                    reward = 0.5  # Small reward for using house as intermediate
                     self.carrying = False
                     self.garbage_collected += 1
+                    self.garbage_at_house += 1
                     info['action'] = 'dropped_at_house'
                 elif current_cell == self.RECYCLE_BIN:
-                    # Drop at recycling bin
-                    reward = 10
+                    # Drop directly at recycling bin
+                    reward = 2  # Bigger reward for direct recycling
                     self.carrying = False
-                    self.garbage_collected += 1
-                    info['action'] = 'dropped_at_recycle'
+                    self.garbage_at_facility += 1
+                    info['action'] = 'dropped_at_facility'
                 else:
                     # Invalid drop location
                     reward = -1
@@ -185,12 +194,12 @@ class GarbageCollectionEnv(gym.Env):
                 reward = -1
                 info['action'] = 'drop_failed_not_carrying'
             new_pos = self.agent_pos
-        
+    
         # Handle movement
         if action in [0, 1, 2, 3]:
             if self._is_valid_position(new_pos):
                 self.agent_pos = new_pos
-                reward = -0.1  # Small penalty for movement
+                reward = 0  # No penalty/reward for moving in empty space
                 info['action'] = 'moved'
             else:
                 # Collision with obstacle or boundary
@@ -200,16 +209,31 @@ class GarbageCollectionEnv(gym.Env):
         # Update total reward
         self.total_reward += reward
         
-        # Check termination condition
-        if self.garbage_collected >= self.max_garbage:
+        # Check termination condition - terminate when all garbage is at recycling facility
+        total_garbage = self.garbage_at_house + self.garbage_at_facility
+        if total_garbage >= self.max_garbage and self.garbage_at_facility == self.max_garbage:
             terminated = True
             info['final_reward'] = self.total_reward
         
         return self._get_observation(), reward, terminated, False, info
     
+    # Update the render method in GarbageCollectionEnv class
     def render(self):
         if self.render_mode == "human" and self.renderer:
-            self.renderer.render(self.grid, self.agent_pos, self.carrying, self.total_reward)
+            # Create garbage stats dictionary
+            garbage_stats = {
+                "house": self.garbage_at_house,
+                "facility": self.garbage_at_facility,
+                "max": self.max_garbage
+            }
+            # Pass the stats to the renderer
+            self.renderer.render(
+                self.grid, 
+                self.agent_pos, 
+                self.carrying, 
+                self.total_reward,
+                garbage_stats
+            )
             return True
         return None
     
@@ -233,10 +257,8 @@ if __name__ == "__main__":
             done = False
             step_count = 0
             
-            print(f"New episode started. Agent at {env.agent_pos}")
-            
             while not done:
-                # Handle pygame events first
+                # Handle pygame events
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         raise KeyboardInterrupt

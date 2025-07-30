@@ -103,7 +103,7 @@ class GameRenderer:
                            (self.window_size, i * self.cell_size), 1)
     
     def _draw_cell(self, row, col, cell_type):
-        """Draw a single cell based on its type"""
+        """Draw a cell with the appropriate content"""  # Fixed missing docstring end
         x = col * self.cell_size
         y = row * self.cell_size
         
@@ -138,19 +138,7 @@ class GameRenderer:
             small_garbage = pygame.transform.scale(self.images['garbage'], (15, 15))
             self.screen.blit(small_garbage, (x + self.cell_size - 20, y))
     
-    def _draw_ui(self, total_reward):
-        """Draw UI elements (reward counter)"""
-        ui_y = self.window_size + 10
-        
-        # Draw reward
-        reward_text = self.font.render(f"Total Reward: {total_reward:.1f}", True, self.BLACK)
-        self.screen.blit(reward_text, (10, ui_y))
-        
-        # Draw instructions
-        instruction_text = self.small_font.render("Agent moving randomly - collecting garbage", True, self.GRAY)
-        self.screen.blit(instruction_text, (10, ui_y + 30))
-    
-    def render(self, grid, agent_pos, carrying, total_reward):
+    def render(self, grid, agent_pos, carrying, total_reward, garbage_stats):
         """Main render function"""
         try:
             # Clear screen
@@ -167,8 +155,25 @@ class GameRenderer:
             # Draw grid lines
             self._draw_grid()
             
-            # Draw UI
-            self._draw_ui(total_reward)
+            # Draw dashboard
+            dashboard_y = self.window_size + 10
+            stats_color = (0, 0, 0)  # Black text
+            
+            # Display statistics
+            total_text = self.font.render(f'Total Reward: {total_reward:.1f}', True, stats_color)
+            self.screen.blit(total_text, (10, dashboard_y))
+            
+            house_text = self.small_font.render(f'At House: {garbage_stats["house"]}', True, stats_color)
+            self.screen.blit(house_text, (10, dashboard_y + 30))
+            
+            facility_text = self.small_font.render(f'At Facility: {garbage_stats["facility"]}', True, stats_color)
+            self.screen.blit(facility_text, (150, dashboard_y + 30))
+            
+            remaining_text = self.small_font.render(f'Remaining: {garbage_stats["max"] - garbage_stats["house"] - garbage_stats["facility"]}', True, stats_color)
+            self.screen.blit(remaining_text, (290, dashboard_y + 30))
+            
+            carrying_text = self.small_font.render(f'Carrying: {"Yes" if carrying else "No"}', True, stats_color)
+            self.screen.blit(carrying_text, (430, dashboard_y + 30))
             
             # Update display
             pygame.display.flip()
