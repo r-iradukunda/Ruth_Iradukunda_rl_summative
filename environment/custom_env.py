@@ -1,275 +1,211 @@
-import gymnasium as gym
-from gymnasium import spaces
-import numpy as np
-import random
 import pygame
-from rendering import GameRenderer
+import os
+import sys
+import numpy as np
 
-class GarbageCollectionEnv(gym.Env):
-    metadata = {"render_modes": ["human"]}
+class GameRenderer:
+    def __init__(self, grid_size):
+        self.grid_size = grid_size
+        self.cell_size = 50
+        self.window_size = grid_size * self.cell_size
+        
+        # Colors
+        self.WHITE = (255, 255, 255)
+        self.BLACK = (0, 0, 0)
+        self.GRAY = (128, 128, 128)
+        self.GREEN = (0, 255, 0)
+        self.RED = (255, 0, 0)
+        self.BLUE = (0, 0, 255)
+        self.YELLOW = (255, 255, 0)
+        
+        # Initialize Pygame with error handling
+        try:
+            if not pygame.get_init():
+                pygame.init()
+            print("Pygame initialized successfully")
+            
+            # Set display mode with error handling
+            os.environ['SDL_VIDEODRIVER'] = 'windib'  # Try windows driver
+            self.screen = pygame.display.set_mode((self.window_size, self.window_size + 60))
+            if self.screen is None:
+                raise pygame.error("Could not create display surface")
+            print(f"Display created successfully: {pygame.display.get_driver()}")
+            
+            pygame.display.set_caption("Garbage Collection Environment")
+            
+            # Initialize fonts
+            try:
+                self.font = pygame.font.Font(None, 36)
+                self.small_font = pygame.font.Font(None, 24)
+            except pygame.error as e:
+                print(f"Font initialization failed: {e}")
+                self.font = pygame.font.SysFont('arial', 36)
+                self.small_font = pygame.font.SysFont('arial', 24)
+            
+            # Load images
+            self.images = {}
+            self._load_images()
+            
+            print(f"Renderer initialized. Window size: {self.window_size}x{self.window_size + 60}")
+            
+        except Exception as e:
+            print(f"Failed to initialize renderer: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
     
-    def __init__(self, render_mode="human"):
-        super().__init__()
-        
-        # Grid dimensions
-        self.grid_size = 12
-        self.render_mode = render_mode
-        
-        # Action space: 0=UP, 1=DOWN, 2=LEFT, 3=RIGHT, 4=PICK_UP, 5=DROP
-        self.action_space = spaces.Discrete(6)
-        
-        # Observation space: grid state + agent position + carrying state
-        self.observation_space = spaces.Dict({
-            'grid': spaces.Box(low=0, high=4, shape=(self.grid_size, self.grid_size), dtype=np.int32),
-            'agent_pos': spaces.Box(low=0, high=self.grid_size-1, shape=(2,), dtype=np.int32),
-            'carrying': spaces.Discrete(2)  # 0 = not carrying, 1 = carrying
-        })
-        
-        # Game state
-        self.grid = None
-        self.agent_pos = None
-        self.carrying = False
-        self.total_reward = 0
-        self.garbage_collected = 0
-        self.max_garbage = 3
-        
-        # Grid cell types
-        self.EMPTY = 0
-        self.OBSTACLE = 1
-        self.GARBAGE = 2
-        self.HOUSE = 3
-        self.RECYCLE_BIN = 4
-        
-        # Initialize renderer
-        self.renderer = None
-        if self.render_mode == "human":
-            self.renderer = GameRenderer(self.grid_size)
-        
-        self.reset()
-    
-    def _get_empty_positions(self):
-        """Get all empty positions in the grid"""
-        empty_positions = []
-        for i in range(self.grid_size):
-            for j in range(self.grid_size):
-                if self.grid[i][j] == self.EMPTY:
-                    empty_positions.append((i, j))
-        return empty_positions
-    
-    def _place_obstacles(self):
-        """Place random obstacles (black squares) on the grid"""
-        num_obstacles = random.randint(10, 20)
-        empty_positions = self._get_empty_positions()
-        
-        # Remove facility positions from possible obstacle positions
-        facility_positions = {(0, 0), (0, 11)}
-        empty_positions = [pos for pos in empty_positions if pos not in facility_positions]
-        
-        obstacle_positions = random.sample(empty_positions, min(num_obstacles, len(empty_positions)))
-        
-        for pos in obstacle_positions:
-            self.grid[pos[0]][pos[1]] = self.OBSTACLE
-    
-    def _place_garbage(self):
-        """Place garbage items randomly on the grid"""
-        empty_positions = self._get_empty_positions()
-        garbage_positions = random.sample(empty_positions, min(self.max_garbage, len(empty_positions)))
-        
-        for pos in garbage_positions:
-            self.grid[pos[0]][pos[1]] = self.GARBAGE
-    
-    def _place_agent(self):
-        """Place agent at random empty position"""
-        empty_positions = self._get_empty_positions()
-        if empty_positions:
-            self.agent_pos = random.choice(empty_positions)
-        else:
-            self.agent_pos = (1, 1)  # Fallback position
-    
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
-        
-        if seed is not None:
-            random.seed(seed)
-            np.random.seed(seed)
-        
-        # Initialize empty grid
-        self.grid = np.zeros((self.grid_size, self.grid_size), dtype=np.int32)
-        
-        # Place facilities at fixed positions
-        self.grid[0, 0] = self.HOUSE  # Top-left corner
-        self.grid[0, 11] = self.RECYCLE_BIN  # Top-right corner
-        
-        # Place obstacles
-        self._place_obstacles()
-        
-        # Place garbage
-        self._place_garbage()
-        
-        # Place agent
-        self._place_agent()
-        
-        # Reset game state
-        self.carrying = False
-        self.total_reward = 0
-        self.garbage_collected = 0
-        
-        return self._get_observation(), {}
-    
-    def _get_observation(self):
-        """Get current observation"""
-        return {
-            'grid': self.grid.copy(),
-            'agent_pos': np.array(self.agent_pos, dtype=np.int32),
-            'carrying': int(self.carrying)
+    def _load_images(self):
+        """Load and scale images from assets folder"""
+        image_files = {
+            'agent': 'assets/girl.png',
+            'garbage': 'assets/water.png',
+            'house': 'assets/house.png',
+            'recycle': 'assets/recycle-symbol.png'
         }
-    
-    def _is_valid_position(self, pos):
-        """Check if position is valid and not an obstacle"""
-        row, col = pos
-        if row < 0 or row >= self.grid_size or col < 0 or col >= self.grid_size:
-            return False
-        return self.grid[row, col] != self.OBSTACLE
-    
-    def step(self, action):
-        reward = 0
-        terminated = False
-        info = {}
         
-        # Movement actions
-        if action == 0:  # UP
-            new_pos = (self.agent_pos[0] - 1, self.agent_pos[1])
-        elif action == 1:  # DOWN
-            new_pos = (self.agent_pos[0] + 1, self.agent_pos[1])
-        elif action == 2:  # LEFT
-            new_pos = (self.agent_pos[0], self.agent_pos[1] - 1)
-        elif action == 3:  # RIGHT
-            new_pos = (self.agent_pos[0], self.agent_pos[1] + 1)
-        elif action == 4:  # PICK_UP
-            if not self.carrying and self.grid[self.agent_pos[0], self.agent_pos[1]] == self.GARBAGE:
-                # Pick up garbage
-                self.grid[self.agent_pos[0], self.agent_pos[1]] = self.EMPTY
-                self.carrying = True
-                reward = 1
-                info['action'] = 'picked_up_garbage'
-            elif not self.carrying:
-                # Try to pick up on empty
-                reward = -1
-                info['action'] = 'pick_up_failed'
+        for key, filepath in image_files.items():
+            if os.path.exists(filepath):
+                try:
+                    image = pygame.image.load(filepath)
+                    # Scale image to fit cell size
+                    self.images[key] = pygame.transform.scale(image, (self.cell_size - 4, self.cell_size - 4))
+                    print(f"Loaded image: {filepath}")
+                except pygame.error as e:
+                    print(f"Warning: Could not load {filepath}: {e}")
+                    self.images[key] = self._create_fallback_image(key)
             else:
-                # Already carrying
-                reward = -0.1
-                info['action'] = 'already_carrying'
-            new_pos = self.agent_pos
-        elif action == 5:  # DROP
-            if self.carrying:
-                current_cell = self.grid[self.agent_pos[0], self.agent_pos[1]]
-                if current_cell == self.HOUSE:
-                    # Drop at house
-                    reward = 5
-                    self.carrying = False
-                    self.garbage_collected += 1
-                    info['action'] = 'dropped_at_house'
-                elif current_cell == self.RECYCLE_BIN:
-                    # Drop at recycling bin
-                    reward = 10
-                    self.carrying = False
-                    self.garbage_collected += 1
-                    info['action'] = 'dropped_at_recycle'
-                else:
-                    # Invalid drop location
-                    reward = -1
-                    info['action'] = 'invalid_drop'
-            else:
-                # Not carrying anything
-                reward = -1
-                info['action'] = 'drop_failed_not_carrying'
-            new_pos = self.agent_pos
-        
-        # Handle movement
-        if action in [0, 1, 2, 3]:
-            if self._is_valid_position(new_pos):
-                self.agent_pos = new_pos
-                reward = -0.1  # Small penalty for movement
-                info['action'] = 'moved'
-            else:
-                # Collision with obstacle or boundary
-                reward = -1
-                info['action'] = 'collision'
-        
-        # Update total reward
-        self.total_reward += reward
-        
-        # Check termination condition
-        if self.garbage_collected >= self.max_garbage:
-            terminated = True
-            info['final_reward'] = self.total_reward
-        
-        return self._get_observation(), reward, terminated, False, info
+                print(f"Warning: Image file {filepath} not found. Using colored rectangle.")
+                self.images[key] = self._create_fallback_image(key)
     
-    def render(self):
-        if self.render_mode == "human" and self.renderer:
-            self.renderer.render(self.grid, self.agent_pos, self.carrying, self.total_reward)
-            return True
-        return None
+    def _create_fallback_image(self, key):
+        """Create a colored rectangle as fallback for missing images"""
+        fallback = pygame.Surface((self.cell_size - 4, self.cell_size - 4))
+        if key == 'agent':
+            fallback.fill(self.GREEN)  # Green for agent
+        elif key == 'garbage':
+            fallback.fill(self.BLUE)  # Blue for garbage
+        elif key == 'house':
+            fallback.fill(self.RED)  # Red for house
+        elif key == 'recycle':
+            fallback.fill(self.YELLOW)  # Yellow for recycle
+        return fallback
+    
+    def _draw_grid(self):
+        """Draw the grid lines"""
+        for i in range(self.grid_size + 1):
+            # Vertical lines
+            pygame.draw.line(self.screen, self.GRAY, 
+                           (i * self.cell_size, 0), 
+                           (i * self.cell_size, self.window_size), 1)
+            # Horizontal lines
+            pygame.draw.line(self.screen, self.GRAY, 
+                           (0, i * self.cell_size), 
+                           (self.window_size, i * self.cell_size), 1)
+    
+    def _draw_cell(self, row, col, cell_type):
+        """Draw a single cell based on its type"""
+        x = col * self.cell_size
+        y = row * self.cell_size
+        
+        # Fill cell background
+        cell_rect = pygame.Rect(x, y, self.cell_size, self.cell_size)
+        
+        if cell_type == 1:  # Obstacle
+            pygame.draw.rect(self.screen, self.BLACK, cell_rect)
+        else:
+            pygame.draw.rect(self.screen, self.WHITE, cell_rect)
+            
+            # Draw appropriate image based on cell type
+            if cell_type == 2:  # Garbage
+                self.screen.blit(self.images['garbage'], (x + 2, y + 2))
+            elif cell_type == 3:  # House
+                self.screen.blit(self.images['house'], (x + 2, y + 2))
+            elif cell_type == 4:  # Recycle bin
+                self.screen.blit(self.images['recycle'], (x + 2, y + 2))
+    
+    def _draw_agent(self, agent_pos, carrying):
+        """Draw the agent at its position"""
+        row, col = agent_pos
+        x = col * self.cell_size + 2
+        y = row * self.cell_size + 2
+        
+        # Draw agent image
+        self.screen.blit(self.images['agent'], (x, y))
+        
+        # Draw carrying indicator
+        if carrying:
+            # Draw a small garbage icon on top of agent
+            small_garbage = pygame.transform.scale(self.images['garbage'], (15, 15))
+            self.screen.blit(small_garbage, (x + self.cell_size - 20, y))
+    
+    def _draw_ui(self, total_reward):
+        """Draw UI elements (reward counter)"""
+        ui_y = self.window_size + 10
+        
+        # Draw reward
+        reward_text = self.font.render(f"Total Reward: {total_reward:.1f}", True, self.BLACK)
+        self.screen.blit(reward_text, (10, ui_y))
+        
+        # Draw instructions
+        instruction_text = self.small_font.render("Agent moving randomly - collecting garbage", True, self.GRAY)
+        self.screen.blit(instruction_text, (10, ui_y + 30))
+    
+    def render(self, grid, agent_pos, carrying, total_reward):
+        """Main render function"""
+        try:
+            # Clear screen
+            self.screen.fill(self.WHITE)
+            
+            # Draw grid cells
+            for row in range(self.grid_size):
+                for col in range(self.grid_size):
+                    self._draw_cell(row, col, grid[row][col])
+            
+            # Draw agent
+            self._draw_agent(agent_pos, carrying)
+            
+            # Draw grid lines
+            self._draw_grid()
+            
+            # Draw UI
+            self._draw_ui(total_reward)
+            
+            # Update display
+            pygame.display.flip()
+            
+        except Exception as e:
+            print(f"Error in render: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def show_completion(self, final_reward):
+        """Show completion message"""
+        # Create semi-transparent overlay
+        overlay = pygame.Surface((self.window_size, self.window_size))
+        overlay.set_alpha(180)
+        overlay.fill((0, 0, 0))
+        self.screen.blit(overlay, (0, 0))
+        
+        # Draw completion message
+        complete_text = self.font.render("Job Complete!", True, self.GREEN)
+        reward_text = self.font.render(f"Final Reward: {final_reward:.1f}", True, self.GREEN)
+        restart_text = self.small_font.render("Restarting in 3 seconds...", True, self.WHITE)
+        
+        # Center the text
+        complete_rect = complete_text.get_rect(center=(self.window_size // 2, self.window_size // 2 - 40))
+        reward_rect = reward_text.get_rect(center=(self.window_size // 2, self.window_size // 2))
+        restart_rect = restart_text.get_rect(center=(self.window_size // 2, self.window_size // 2 + 40))
+        
+        self.screen.blit(complete_text, complete_rect)
+        self.screen.blit(reward_text, reward_rect)
+        self.screen.blit(restart_text, restart_rect)
+        
+        pygame.display.flip()
     
     def close(self):
-        if hasattr(self, 'renderer') and self.renderer:
-            self.renderer.close()
-
-# Main execution with random agent
-if __name__ == "__main__":
-    # Initialize pygame first
-    pygame.init()
-    
-    env = GarbageCollectionEnv(render_mode="human")
-    
-    print("Starting Garbage Collection Environment...")
-    print("Press Ctrl+C or close the window to exit")
-    
-    try:
-        while True:
-            obs, info = env.reset()
-            done = False
-            step_count = 0
-            
-            print(f"New episode started. Agent at {env.agent_pos}")
-            
-            while not done:
-                # Handle pygame events first
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        raise KeyboardInterrupt
-                
-                # Random action
-                action = env.action_space.sample()
-                obs, reward, terminated, truncated, info = env.step(action)
-                done = terminated or truncated
-                
-                # Render the environment
-                env.render()
-                
-                # Add delay for visibility
-                pygame.time.delay(300)
-                
-                step_count += 1
-                
-                # Print some debug info occasionally
-                if step_count % 20 == 0:
-                    action_names = ["UP", "DOWN", "LEFT", "RIGHT", "PICK_UP", "DROP"]
-                    print(f"Step {step_count}: Action={action_names[action]}, Reward={reward:.1f}, Total={env.total_reward:.1f}")
-                
-                if done:
-                    print(f"Episode completed! Final reward: {env.total_reward:.1f}")
-                    # Show completion message
-                    if env.renderer:
-                        env.renderer.show_completion(env.total_reward)
-                    pygame.time.delay(3000)  # Wait 3 seconds before restarting
-                    break
-                    
-    except KeyboardInterrupt:
-        print("Game stopped by user")
-    finally:
-        env.close()
-        pygame.quit()
-        print("Game closed.")
+        """Clean up pygame resources"""
+        try:
+            if pygame.get_init():
+                pygame.display.quit()
+        except:
+            pass
