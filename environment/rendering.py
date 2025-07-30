@@ -61,20 +61,79 @@ class GarbageCollectionEnv(gym.Env):
                     empty_positions.append((i, j))
         return empty_positions
     
+    def _is_path_available(self, start, end, grid):
+        """Check if there's a path between start and end positions using BFS"""
+        if start == end:
+            return True
+            
+        queue = [(start[0], start[1])]
+        visited = set([start])
+        
+        # Define possible movements (up, down, left, right)
+        moves = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+        
+        while queue:
+            current = queue.pop(0)
+            
+            if current == end:
+                return True
+                
+            for move in moves:
+                next_pos = (current[0] + move[0], current[1] + move[1])
+                
+                # Check if position is valid and not visited
+                if (0 <= next_pos[0] < self.grid_size and 
+                    0 <= next_pos[1] < self.grid_size and 
+                    next_pos not in visited and 
+                    grid[next_pos[0]][next_pos[1]] != self.OBSTACLE):
+                    
+                    queue.append(next_pos)
+                    visited.add(next_pos)
+        
+        return False
+
     def _place_obstacles(self):
-        """Place random obstacles (black squares) on the grid"""
+        """Place random obstacles ensuring paths remain accessible"""
         num_obstacles = random.randint(10, 20)
         empty_positions = self._get_empty_positions()
         
-        # Remove facility positions from possible obstacle positions
-        facility_positions = {(0, 0), (0, 11)}
-        empty_positions = [pos for pos in empty_positions if pos not in facility_positions]
+        # Get important positions that need to remain accessible
+        house_pos = (0, 0)  # Top-left corner
+        recycle_pos = (0, self.grid_size-1)  # Top-right corner
         
-        obstacle_positions = random.sample(empty_positions, min(num_obstacles, len(empty_positions)))
-        
-        for pos in obstacle_positions:
-            self.grid[pos[0]][pos[1]] = self.OBSTACLE
-    
+        for _ in range(num_obstacles):
+            if not empty_positions:
+                break
+                
+            # Try random positions until finding one that doesn't block paths
+            valid_position = False
+            attempts = 0
+            while not valid_position and attempts < 10:
+                if not empty_positions:
+                    break
+                    
+                pos_idx = random.randint(0, len(empty_positions) - 1)
+                pos = empty_positions[pos_idx]
+                
+                # Temporarily place obstacle
+                temp_grid = self.grid.copy()
+                temp_grid[pos[0]][pos[1]] = self.OBSTACLE
+                
+                # Check if paths still exist between key locations
+                paths_exist = (
+                    self._is_path_available(house_pos, recycle_pos, temp_grid) and
+                    all(self._is_path_available(pos, recycle_pos, temp_grid) 
+                        for pos in self._get_garbage_positions())
+                )
+                
+                if paths_exist:
+                    self.grid[pos[0]][pos[1]] = self.OBSTACLE
+                    empty_positions.remove(pos)
+                    valid_position = True
+                else:
+                    empty_positions.remove(pos)  # Remove invalid position
+                    attempts += 1
+
     def _place_garbage(self):
         """Place garbage items randomly on the grid"""
         empty_positions = self._get_empty_positions()
@@ -141,11 +200,28 @@ class GarbageCollectionEnv(gym.Env):
             return False
         return self.grid[row, col] != self.OBSTACLE
     
+    def _get_garbage_positions(self):
+        """Get positions of all garbage in the grid"""
+        positions = []
+        for i in range(self.grid_size):
+            for j in range(self.grid_size):
+                if self.grid[i][j] == self.GARBAGE:
+                    positions.append((i, j))
+        return positions
+    
     def step(self, action):
-        reward = 0  # Initialize reward to 0 (neutral for empty grid movement)
+        reward = 0
         terminated = False
         info = {}
         
+        # Automatic pickup if on garbage
+        if (not self.carrying and 
+            self.grid[self.agent_pos[0], self.agent_pos[1]] == self.GARBAGE):
+            self.grid[self.agent_pos[0], self.agent_pos[1]] = self.EMPTY
+            self.carrying = True
+            reward += 1
+            info['action'] = 'auto_pickup_garbage'
+
         # Movement actions
         if action == 0:  # UP
             new_pos = (self.agent_pos[0] - 1, self.agent_pos[1])
@@ -156,20 +232,21 @@ class GarbageCollectionEnv(gym.Env):
         elif action == 3:  # RIGHT
             new_pos = (self.agent_pos[0], self.agent_pos[1] + 1)
         elif action == 4:  # PICK_UP
+            # PICK_UP action logic
             if not self.carrying and self.grid[self.agent_pos[0], self.agent_pos[1]] == self.GARBAGE:
-                # Pick up garbage
                 self.grid[self.agent_pos[0], self.agent_pos[1]] = self.EMPTY
                 self.carrying = True
-                reward = 1  # Reward for picking up garbage
+                reward = 1
                 info['action'] = 'picked_up_garbage'
             elif not self.carrying:
-                reward = -1  # Penalty for trying to pick up nothing
+                reward = -1
                 info['action'] = 'pick_up_failed'
             else:
-                reward = -0.1  # Small penalty for invalid action
+                reward = -0.1
                 info['action'] = 'already_carrying'
             new_pos = self.agent_pos
         elif action == 5:  # DROP
+            # DROP action logic
             if self.carrying:
                 current_cell = self.grid[self.agent_pos[0], self.agent_pos[1]]
                 if current_cell == self.HOUSE:
@@ -194,18 +271,41 @@ class GarbageCollectionEnv(gym.Env):
                 reward = -1
                 info['action'] = 'drop_failed_not_carrying'
             new_pos = self.agent_pos
-    
+
         # Handle movement
         if action in [0, 1, 2, 3]:
             if self._is_valid_position(new_pos):
                 self.agent_pos = new_pos
-                reward = 0  # No penalty/reward for moving in empty space
                 info['action'] = 'moved'
+                
+                # Check for automatic pickup at new position
+                if (not self.carrying and 
+                    self.grid[self.agent_pos[0], self.agent_pos[1]] == self.GARBAGE):
+                    self.grid[self.agent_pos[0], self.agent_pos[1]] = self.EMPTY
+                    self.carrying = True
+                    reward += 1
+                    info['action'] = 'moved_and_pickup'
+                
+                # Automatic drop at house or recycling facility
+                elif self.carrying:
+                    current_cell = self.grid[self.agent_pos[0], self.agent_pos[1]]
+                    if current_cell == self.HOUSE:
+                        # Auto drop at house
+                        self.carrying = False
+                        self.garbage_collected += 1
+                        self.garbage_at_house += 1
+                        reward += 0.5
+                        info['action'] = 'auto_dropped_at_house'
+                    elif current_cell == self.RECYCLE_BIN:
+                        # Auto drop at recycling bin
+                        self.carrying = False
+                        self.garbage_at_facility += 1
+                        reward += 2
+                        info['action'] = 'auto_dropped_at_facility'
             else:
-                # Collision with obstacle or boundary
                 reward = -1
                 info['action'] = 'collision'
-        
+
         # Update total reward
         self.total_reward += reward
         
@@ -216,7 +316,7 @@ class GarbageCollectionEnv(gym.Env):
             info['final_reward'] = self.total_reward
         
         return self._get_observation(), reward, terminated, False, info
-    
+
     # Update the render method in GarbageCollectionEnv class
     def render(self):
         if self.render_mode == "human" and self.renderer:
@@ -295,4 +395,3 @@ if __name__ == "__main__":
         env.close()
         pygame.quit()
         print("Game closed.")
-
