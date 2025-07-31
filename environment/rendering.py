@@ -3,7 +3,7 @@ from gymnasium import spaces
 import numpy as np
 import random
 import pygame
-from custom_env import GameRenderer
+from environment.custom_env import GameRenderer
 
 class GarbageCollectionEnv(gym.Env):
     metadata = {"render_modes": ["human"]}
