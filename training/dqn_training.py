@@ -66,7 +66,7 @@ def train_dqn():
         eval_freq=5000,
         deterministic=True,
         render=False,
-        n_eval_episodes=10,
+        n_eval_episodes=3,
         verbose=1
     )
     
