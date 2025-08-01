@@ -1,146 +1,320 @@
-# pg_training.py
-
 import os
 import sys
-
-# Add the project root directory to Python path
-root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(root_dir)
-
-import gymnasium as gym
-from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
-from environment.rendering import GarbageCollectionEnv
-import numpy as np
+import time
 import torch
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+from stable_baselines3 import PPO
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 
-def make_env(rank, seed=0, render_mode=None):
-    """
-    Utility function for multiprocessed env.
-    """
-    def _init():
-        env = GarbageCollectionEnv(render_mode=render_mode)
-        env = Monitor(env)  # Wrap with Monitor
-        env.reset(seed=seed + rank)  # Seed each env differently
+# Add parent directory to path to import our environment
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from environment.rendering import GarbageCollectionEnv
+
+# PPO Training for Garbage Collection Environment
+# Optimized for CPU training with comprehensive logging
+
+def main():
+    print("PPO TRAINING - Proximal Policy Optimization")
+    print("=" * 50)
+    
+    # PPO is optimized for CPU training
+    print(f"Using CPU for PPO training (recommended)")
+    
+    # Create log directories
+    log_dir = "logs/ppo"
+    model_dir = "models/ppo"
+    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(model_dir, exist_ok=True)
+    
+    print(f"Directories created:")
+    print(f"   Logs: {log_dir}")
+    print(f"   Models: {model_dir}")
+
+    # Create environment
+    def make_env():
+        env = GarbageCollectionEnv(render_mode=None)  # No rendering during training
+        env = Monitor(env, log_dir)  # Monitor for logging
         return env
-    return _init
-
-def train_ppo():
-    # Check for GPU availability
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-    if device.type == "cuda":
-        print(f"GPU Name: {torch.cuda.get_device_name(0)}")
-
-    # Create directories for logs and models
-    os.makedirs("models/ppo", exist_ok=True)
-    os.makedirs("../logs/ppo", exist_ok=True)
-
-    # Set number of environments
-    n_envs = 4  # Number of parallel environments
     
-    # Create vectorized environments for training using the same wrapper type
-    env = DummyVecEnv([make_env(i) for i in range(n_envs)])
+    env = DummyVecEnv([make_env])  # Vectorize for SB3
     
-    # Create evaluation environment with the same wrapper type
-    eval_env = DummyVecEnv([make_env(n_envs, render_mode=None)])  # Different seed for eval
-
-    # Define PPO model with optimized hyperparameters
-    model = PPO(
-        policy="MultiInputPolicy",
-        env=env,
-        learning_rate=3e-4,
-        n_steps=2048,
-        batch_size=256,
-        n_epochs=10,
-        gamma=0.99,
-        gae_lambda=0.95,
-        clip_range=0.2,
-        clip_range_vf=0.2,
-        ent_coef=0.01,
-        vf_coef=0.5,
-        max_grad_norm=0.5,
-        policy_kwargs=dict(
-            net_arch=dict(
-                pi=[256, 256],
-                vf=[256, 256]
-            ),
-            optimizer_class=torch.optim.Adam,
-            optimizer_kwargs=dict(eps=1e-5)
-        ),
-        verbose=1,
-        tensorboard_log="../logs/ppo/",
-        device=device
-    )
-
-    # Callbacks for evaluation and checkpoints
-    eval_callback = EvalCallback(
-        eval_env,
-        best_model_save_path="models/ppo/best_model",
-        log_path="../logs/ppo/",
-        eval_freq=5000,
-        deterministic=True,
-        render=False,
-        n_eval_episodes=10,
-        verbose=1
-    )
+    print(f"Environment Details:")
+    print(f"   Grid Size: 12x12")
+    print(f"   Action Space: {env.action_space}")
+    print(f"   Observation Space: {env.observation_space}")
     
+    # PPO Hyperparameters - optimized for our garbage collection task
+    print(f"\nPPO Configuration:")
+    hyperparams = {
+        'policy': "MlpPolicy",
+        'env': env,
+        'learning_rate': 3e-4,  # Standard learning rate for PPO
+        'n_steps': 2048,  # Steps per rollout (batch collection)
+        'batch_size': 64,  # Minibatch size for optimization
+        'n_epochs': 10,  # Optimization epochs per rollout
+        'gamma': 0.99,  # Long-term reward consideration
+        'gae_lambda': 0.95,  # Generalized Advantage Estimation
+        'clip_range': 0.2,  # PPO clipping parameter
+        'clip_range_vf': None,  # Value function clipping (None = no clipping)
+        'ent_coef': 0.01,  # Entropy coefficient for exploration
+        'vf_coef': 0.5,  # Value function coefficient
+        'max_grad_norm': 0.5,  # Gradient clipping
+        'verbose': 0,  # Reduce verbose output
+        'tensorboard_log': log_dir,
+        'device': 'cpu',  # Force CPU usage for PPO (recommended)
+        'policy_kwargs': {
+            'net_arch': [256, 256],  # Smaller network for CPU efficiency
+            'activation_fn': torch.nn.Tanh  # Tanh activation for PPO stability
+        }
+    }
+    
+    for key, value in hyperparams.items():
+        if key not in ['env', 'policy_kwargs']:
+            print(f"   {key}: {value}")
+    print(f"   network_architecture: {hyperparams['policy_kwargs']['net_arch']}")
+    
+    # Create PPO model
+    print(f"\nCreating PPO model...")
+    ppo_model = PPO(**hyperparams)
+    
+    # Training configuration
+    total_timesteps = 50000  # Reduced for CPU efficiency
+    print(f"\nTraining Configuration:")
+    print(f"   Total timesteps: {total_timesteps:,}")
+    print(f"   Expected episodes: ~{total_timesteps // 200}")  # Assuming ~200 steps per episode
+    print(f"   Estimated time: ~{total_timesteps // 500} minutes on CPU")
+    
+    # Create callbacks for better training monitoring
     checkpoint_callback = CheckpointCallback(
-        save_freq=10000,
-        save_path="models/ppo/checkpoints/",
-        name_prefix="ppo_model",
-        save_replay_buffer=True,
-        save_vecnormalize=True
+        save_freq=10000,  # Save every 10000 steps
+        save_path=model_dir,
+        name_prefix="ppo_checkpoint"
     )
-
-    print("Starting PPO training...")
+    
+    # Start training
+    print(f"\nStarting PPO training...")
+    start_time = time.time()
+    
     try:
-        # Train the model
-        total_timesteps = 50000
-        model.learn(
+        ppo_model.learn(
             total_timesteps=total_timesteps,
-            callback=[eval_callback, checkpoint_callback],
-            progress_bar=True,
-            log_interval=100
+            callback=checkpoint_callback,
+            progress_bar=True
         )
-
-        # Save the final model
-        final_model_path = "models/ppo/ppo_model"
-        model.save(final_model_path)
-        print(f"Model saved successfully to {final_model_path}")
-
-        # Evaluate final model
-        mean_reward = 0
-        n_eval_episodes = 20
         
-        print("\nEvaluating final model...")
-        for episode in range(n_eval_episodes):
-            obs = eval_env.reset()[0]
-            episode_reward = 0
-            done = False
+        training_time = time.time() - start_time
+        print(f"\nTraining completed in {training_time:.2f} seconds")
+        print(f"   Average: {training_time/total_timesteps*1000:.2f} ms per step")
+        
+    except KeyboardInterrupt:
+        print(f"\nTraining interrupted by user")
+        training_time = time.time() - start_time
+        print(f"   Partial training time: {training_time:.2f} seconds")
+    
+    # Save the final model
+    model_path = os.path.join(model_dir, "ppo_model.zip")
+    ppo_model.save(model_path)
+    print(f"Model saved to: {model_path}")
+    
+    # Close training environment
+    env.close()
+    
+    # Generate training analysis
+    generate_training_analysis(log_dir, model_dir)
+    
+    # Test the trained model
+    test_trained_model(model_path)
+    
+    print(f"\nPPO training complete!")
+    print(f"   Model: {model_path}")
+    print(f"   Logs: {log_dir}")
+
+def generate_training_analysis(log_dir, model_dir):
+    """Generate comprehensive training analysis plots"""
+    print(f"\nGenerating training analysis...")
+    
+    # Look for monitor files
+    monitor_files = []
+    for file in os.listdir(log_dir):
+        if file.startswith("monitor") and file.endswith(".csv"):
+            monitor_files.append(os.path.join(log_dir, file))
+    
+    if not monitor_files:
+        print(f"No monitor files found in {log_dir}")
+        return
+    
+    # Use the first monitor file found
+    monitor_file = monitor_files[0]
+    print(f"Using monitor file: {monitor_file}")
+    
+    try:
+        # Load training data - monitor files have a header comment line
+        with open(monitor_file, 'r') as f:
+            first_line = f.readline()
             
-            while not done:
-                action, _ = model.predict(obs, deterministic=True)
-                obs, reward, terminated, truncated, _ = eval_env.step(action)
-                episode_reward += reward
-                done = terminated or truncated
-                
-            mean_reward += episode_reward
-            print(f"Episode {episode + 1}/{n_eval_episodes}: Reward = {episode_reward:.2f}")
+        # Skip header if it starts with #
+        skiprows = 1 if first_line.startswith('#') else 0
+        df = pd.read_csv(monitor_file, skiprows=skiprows)
         
-        mean_reward /= n_eval_episodes
-        print(f"\nFinal evaluation: mean reward = {mean_reward:.2f}")
+        if df.empty:
+            print(f"Monitor file is empty")
+            return
+            
+        # Check for reward column (could be 'r' or 'reward')
+        reward_col = None
+        if 'r' in df.columns:
+            reward_col = 'r'
+        elif 'reward' in df.columns:
+            reward_col = 'reward'
+        else:
+            print(f"No reward data found. Available columns: {list(df.columns)}")
+            return
+        
+        print(f"Found {len(df)} episodes in monitor data")
+        
+        # Calculate metrics
+        df['episode'] = range(len(df))
+        df['avg_reward'] = df[reward_col].rolling(window=min(50, len(df)), min_periods=1).mean()
+        df['cumulative_reward'] = df[reward_col].cumsum()
+        
+        # Create comprehensive plots
+        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+        fig.suptitle('PPO Training Analysis', fontsize=16, fontweight='bold')
+        
+        # 1. Episode rewards
+        axes[0, 0].plot(df['episode'], df[reward_col], alpha=0.3, color='lightgreen', label='Episode Reward')
+        axes[0, 0].plot(df['episode'], df['avg_reward'], color='darkgreen', linewidth=2, label=f'Moving Average ({min(50, len(df))})')
+        axes[0, 0].set_xlabel('Episode')
+        axes[0, 0].set_ylabel('Reward')
+        axes[0, 0].set_title('Training Progress')
+        axes[0, 0].legend()
+        axes[0, 0].grid(True, alpha=0.3)
+        
+        # 2. Cumulative reward
+        axes[0, 1].plot(df['episode'], df['cumulative_reward'], color='blue', linewidth=2)
+        axes[0, 1].set_xlabel('Episode')
+        axes[0, 1].set_ylabel('Cumulative Reward')
+        axes[0, 1].set_title('Learning Accumulation')
+        axes[0, 1].grid(True, alpha=0.3)
+        
+        # 3. Episode length
+        length_col = None
+        if 'l' in df.columns:
+            length_col = 'l'
+        elif 'length' in df.columns:
+            length_col = 'length'
+            
+        if length_col:
+            df['avg_length'] = df[length_col].rolling(window=min(50, len(df)), min_periods=1).mean()
+            axes[1, 0].plot(df['episode'], df[length_col], alpha=0.3, color='orange', label='Episode Length')
+            axes[1, 0].plot(df['episode'], df['avg_length'], color='red', linewidth=2, label='Moving Average')
+            axes[1, 0].set_xlabel('Episode')
+            axes[1, 0].set_ylabel('Steps')
+            axes[1, 0].set_title('Episode Length')
+            axes[1, 0].legend()
+            axes[1, 0].grid(True, alpha=0.3)
+        else:
+            axes[1, 0].text(0.5, 0.5, 'No episode length data available', 
+                           transform=axes[1, 0].transAxes, ha='center', va='center')
+            axes[1, 0].set_title('Episode Length (No Data)')
+        
+        # 4. Performance statistics
+        axes[1, 1].axis('off')
+        
+        # Calculate improvement
+        if len(df) >= 4:
+            first_quarter = df[reward_col][:len(df)//4].mean()
+            last_quarter = df[reward_col][3*len(df)//4:].mean()
+            improvement = last_quarter - first_quarter
+        else:
+            first_quarter = df[reward_col].iloc[0] if len(df) > 0 else 0
+            last_quarter = df[reward_col].iloc[-1] if len(df) > 0 else 0
+            improvement = last_quarter - first_quarter
+        
+        stats_text = f"""
+PPO Training Statistics:
 
+Episodes: {len(df)}
+Mean Reward: {df[reward_col].mean():.2f}
+Best Reward: {df[reward_col].max():.2f}
+Final Avg Reward: {df['avg_reward'].iloc[-1]:.2f}
+
+Standard Deviation: {df[reward_col].std():.2f}
+Success Rate: {(df[reward_col] > 0).mean()*100:.1f}%
+
+Learning Trend:
+First 25%: {first_quarter:.2f}
+Last 25%: {last_quarter:.2f}
+Improvement: {improvement:.2f}
+        """
+        axes[1, 1].text(0.1, 0.9, stats_text, transform=axes[1, 1].transAxes, 
+                        fontsize=10, verticalalignment='top', fontfamily='monospace',
+                        bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray"))
+        
+        plt.tight_layout()
+        
+        # Save the analysis
+        analysis_path = os.path.join(model_dir, "ppo_training_analysis.png")
+        plt.savefig(analysis_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"Training analysis saved to: {analysis_path}")
+        
     except Exception as e:
-        print(f"An error occurred during training: {e}")
-        if device.type == "cuda":
-            print(f"GPU Memory at error: {torch.cuda.memory_allocated(0) / 1024**2:.2f} MB")
-        raise
-    finally:
-        env.close()
-        eval_env.close()
+        print(f"Error generating analysis: {e}")
+        print(f"Monitor file exists but couldn't be processed: {monitor_file}")
+
+def test_trained_model(model_path):
+    """Test the trained model"""
+    print(f"\nTesting trained model...")
+    
+    try:
+        # Create test environment
+        test_env = GarbageCollectionEnv(render_mode=None)
+        
+        # Load trained model
+        ppo_model = PPO.load(model_path)
+        
+        # Run demonstration episodes
+        num_test_episodes = 5
+        total_rewards = []
+        
+        print(f"Running {num_test_episodes} test episodes...")
+        
+        for episode in range(num_test_episodes):
+            obs, _ = test_env.reset()
+            episode_reward = 0
+            episode_steps = 0
+            
+            for step in range(200):  # Max steps per episode
+                action, _ = ppo_model.predict(obs, deterministic=True)
+                obs, reward, terminated, truncated, _ = test_env.step(action)
+                episode_reward += reward
+                episode_steps += 1
+                
+                if terminated or truncated:
+                    break
+            
+            total_rewards.append(episode_reward)
+            print(f"   Episode {episode + 1}: Reward = {episode_reward:.2f}, Steps = {episode_steps}")
+        
+        test_env.close()
+        
+        # Print test results
+        avg_reward = np.mean(total_rewards)
+        print(f"\nTest Results:")
+        print(f"   Average Reward: {avg_reward:.2f}")
+        print(f"   Best Episode: {max(total_rewards):.2f}")
+        print(f"   Worst Episode: {min(total_rewards):.2f}")
+        print(f"   Standard Deviation: {np.std(total_rewards):.2f}")
+        
+    except Exception as e:
+        print(f"Error testing model: {e}")
+        print("Model testing failed, but training was completed successfully.")
 
 if __name__ == "__main__":
-    train_ppo()
+    main()
