@@ -63,25 +63,21 @@ Ruth_Iradukunda_rl_summative/
 ├── environment/
 │   ├── custom_env.py          # Core environment logic
 │   ├── rendering.py           # Pygame visualization system
-│   └── assets/               # Graphics (girl.png, house.png, etc.)
+│   └── assets/               # Graphics (icon used in the GUI)
 ├── training/
 │   ├── dqn_training.py       # DQN implementation
 │   ├── ppo_training.py       # PPO implementation
 │   ├── a2c_training.py       # A2C implementation
 │   ├── reinforce_training.py # REINFORCE implementation
-│   ├── comprehensive_training.py # Training orchestrator
-│   └── models/               # Saved trained models
+│   ├── models/               # Saved trained models
 ├── evaluation/
 │   ├── evaluation_system.py  # Performance evaluation
-│   ├── visualization_system.py # Plotting and analysis
-│   └── results/              # Evaluation results
+│   ├── performance_metrics.py # Individual model evaluation
+│   └── visualization_system.py # Plotting and analysis
 ├── demo/
-│   ├── random_agent_demo.py  # Random baseline demonstration
-│   └── recordings/           # Video demonstrations
-├── docs/
-│   ├── algorithm_analysis.md # Theoretical analysis
-│   └── hyperparameter_justification.md
-└── main.py                   # Project entry point
+│   └── random_agent_demo.py  # Random baseline demonstration with GIF export
+├── main.py                   # Project entry point with garbage collection demo
+└── README.md                # Project documentation
 ```
 
 ## Installation and Setup
@@ -89,12 +85,7 @@ Ruth_Iradukunda_rl_summative/
 ### **Requirements**
 
 ```bash
-pip install gymnasium
-pip install stable-baselines3[extra]
-pip install pygame
-pip install torch torchvision
-pip install matplotlib seaborn
-pip install pandas numpy
+pip install -r requirements.txt
 ```
 
 ### **Hardware Requirements**
@@ -220,13 +211,13 @@ This project demonstrates:
 
 ### **Rubric Requirements Met:**
 
-- ✅ **Custom Environment**: Fully implemented garbage collection simulation
-- ✅ **Multiple Algorithms**: DQN, PPO, A2C, REINFORCE with proper implementations
-- ✅ **Performance Evaluation**: Comprehensive metrics and comparative analysis
-- ✅ **Visualizations**: Plots, charts, and performance comparisons
-- ✅ **Hyperparameter Analysis**: Justified choices with theoretical backing
-- ✅ **Demo Creation**: Random agent baseline and trained model demonstrations
-- ✅ **Documentation**: Detailed theoretical analysis and implementation guides
+- **Custom Environment**: Fully implemented garbage collection simulation
+- **Multiple Algorithms**: DQN, PPO, A2C, REINFORCE with proper implementations
+- **Performance Evaluation**: Comprehensive metrics and comparative analysis
+- **Visualizations**: Plots, charts, and performance comparisons
+- **Hyperparameter Analysis**: Justified choices with theoretical backing
+- **Demo Creation**: Random agent baseline and trained model demonstrations
+- **Documentation**: Detailed theoretical analysis and implementation guides
 
 ### **Excellence Criteria (10/10 points):**
 
@@ -246,8 +237,4 @@ This project demonstrates:
 
 ## Author
 
-Ruth Iradukunda - Reinforcement Learning Summative Assignment
-
-## License
-
-This project is developed for academic purposes as part of a reinforcement learning course.
+> Ruth Iradukunda - RL_Summative
